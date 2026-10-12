@@ -60,7 +60,7 @@ Kanban gibi tam sayfa araçların mevcut davranışını koru.
 - Pencereler modu: Birden fazla session aynı çalışma alanında görünür.
 - Sidebar'dan session aç: Mevcut native session ek pencere olarak açılır.
 - + Yeni session: Yeni bir gerçek session penceresi açar.
-- Başlığı başka pencerenin üzerine sürükleyip bırak: iki session yer değiştirir. Kenar/köşeleri çek: ortak satır/sütun sınırları değişir, pencereler çakışmaz.
+- Başlığı başka pencerenin üzerine sürükleyip bırak: iki session yer değiştirir. Kenar/köşeleri çek: yalnız seçilen pencerenin boyutu değişir. Büyüme komşuya ulaşırsa yalnız temas edilen komşu yer açar.
 - Düzenle: Pencereleri çalışma alanına yeniden dizer.
 - Büyüt/geri al: Session için daha fazla alan ayırır, diğerleri görünür kalır. Tekrar basınca önceki oranlara döner.
 - Sekmeler: Mevcut sekmeli görünüme döner.
@@ -181,3 +181,9 @@ Bu bölüm, yukarıdaki ilk prototip/kurulum durumunun güncel devamıdır.
 `session-tile-layout.ts` canvas başına ortak yerleşim state sahibi oldu. Frame bileşenleri yalnız bu küçük store’u dinler. Başlık sürükleme bırakıldığında slot değiştirir. Resize komşu satır/sütunların payını değiştirir. Son satırdaki boş hücreler son session tarafından doldurulur. Büyütme diğer session’ları örtmez, alan oranlarını değiştirir. Pencere ekleme/çıkarma eşit dağılımı yeniden kurar. Geometri halen yeniden açılışta kalıcı değildir.
 
 Dört hedefli test dosyasında 16 test, renderer TypeScript kontrolü ve production build geçti. `session-tile-layout.test.ts` beş session için sınır, çakışmama, resize, yer değiştirme, büyüt/geri al ve küçük viewport davranışını kontrol eder. DOM testinde taşınan/boyutlanan chat bileşeni ve taslağı korunur. Başlıkta ok tuşları slot değiştirir, Shift+ok ortak alt/sağ sınırı ayarlar. Canvas dış kenarı büyütülemez. Yeni renderer mevcut özel runtime üzerine paketlenir, resmi updater engeli korunur.
+
+## 12. Bağımsız resize düzeltmesi, 12 Ekim 2026
+
+11. bölümdeki ortak satır/sütun ölçüleri kullanıcı tarafından reddedildi: tek pencere resize edilince tüm satır/sütun etkileniyordu. Güncel `SessionTileLayout` her session için ayrı dikdörtgen tutar. Küçültme diğer pencerelerin konum ve boyutlarını değiştirmez, boş alan bırakabilir. Büyütme boş alanı kullanır, yalnız temas edilen komşunun kalan dikdörtgen alanını küçültür. Komşu minimum boyutuna gelirse büyüme sınırlandırılır. Diğer satırlar otomatik resize edilmez. Yer değiştirme iki pencerenin dikdörtgenini takas eder. Düzenle ve pencere ekleme/çıkarma hâlâ eşit yerleşimi yeniden kurar. Tüm uygulamanın boyutu değiştiğinde çerçeveler oransal uyarlanır.
+
+17 hedefli test geçti. Yeni test dört pencereden birini küçültürken diğer üçü için aynı dikdörtgen nesnesinin korunduğunu, büyütürken yalnız temas edilen komşunun değiştiğini doğrular. TypeScript ve production renderer build geçti.

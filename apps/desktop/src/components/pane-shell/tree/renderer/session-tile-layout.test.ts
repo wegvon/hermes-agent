@@ -42,3 +42,20 @@ it('keeps every session disjoint through resize, swap, focus, viewport shrink an
   layout.unregister('3')
   check(320, 240)
 })
+
+it('resizes one of four windows independently and only makes the contacted neighbour yield', () => {
+  const layout = new SessionTileLayout()
+  layout.measure({ width: 1400, height: 900 })
+  for (let i = 0; i < 4; i++) layout.register(String(i), i)
+  const original = layout.state.get().frames
+  layout.resize('0', 'e', -120, 0)
+  const smaller = layout.state.get().frames
+  expect(smaller['0']!.width).toBe(original['0']!.width - 120)
+  for (const id of ['1', '2', '3']) expect(smaller[id]).toBe(original[id])
+  layout.resize('0', 'e', 200, 0)
+  const larger = layout.state.get().frames
+  expect(larger['0']!.width).toBe(original['0']!.width + 80)
+  expect(larger['1']!.width).toBe(original['1']!.width - 80)
+  expect(larger['2']).toBe(original['2'])
+  expect(larger['3']).toBe(original['3'])
+})

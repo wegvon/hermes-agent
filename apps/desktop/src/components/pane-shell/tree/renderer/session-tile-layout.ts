@@ -7,15 +7,46 @@ interface TileSnapshot {
   focused: string | null
 }
 
-/** One layout per canvas: shared boundaries make overlapping frames impossible. */
+type Frames = Record<string, SessionWindowRect>
+const gap = 8
+
+function intersects(a: SessionWindowRect, b: SessionWindowRect) {
+  return (
+    a.x < b.x + b.width + gap && a.x + a.width + gap > b.x && a.y < b.y + b.height + gap && a.y + a.height + gap > b.y
+  )
+}
+
+/** Retain the largest rectangular part of a neighbour outside the resized frame. */
+function makeRoom(peer: SessionWindowRect, frame: SessionWindowRect): SessionWindowRect | null {
+  const candidates = [
+    { ...peer, width: Math.min(peer.width, frame.x - gap - peer.x) },
+    { ...peer, height: Math.min(peer.height, frame.y - gap - peer.y) },
+    {
+      ...peer,
+      x: Math.max(peer.x, frame.x + frame.width + gap),
+      width: peer.x + peer.width - Math.max(peer.x, frame.x + frame.width + gap)
+    },
+    {
+      ...peer,
+      y: Math.max(peer.y, frame.y + frame.height + gap),
+      height: peer.y + peer.height - Math.max(peer.y, frame.y + frame.height + gap)
+    }
+  ]
+  const minWidth = Math.min(180, peer.width)
+  const minHeight = Math.min(120, peer.height)
+  return (
+    candidates
+      .filter(rect => rect.width >= minWidth && rect.height >= minHeight)
+      .sort((a, b) => b.width * b.height - a.width * a.height)[0] ?? null
+  )
+}
+
+/** Each session owns a rectangle. Only neighbours touched by growth yield space. */
 export class SessionTileLayout {
   readonly state = atom<TileSnapshot>({ frames: {}, focused: null })
   private order: string[] = []
   private size: CanvasSize = { width: 1000, height: 650 }
-  private columns = 1
-  private widths: number[] = [1]
-  private heights: number[] = [1]
-  private saved: { widths: number[]; heights: number[] } | null = null
+  private saved: Frames | null = null
 
   register(id: string, index: number) {
     if (this.order.includes(id)) {
@@ -34,49 +65,52 @@ export class SessionTileLayout {
     if (size.width <= 0 || size.height <= 0 || (size.width === this.size.width && size.height === this.size.height)) {
       return
     }
+    const scale = (frames: Frames) =>
+      Object.fromEntries(
+        Object.entries(frames).map(([id, rect]) => [
+          id,
+          {
+            x: (rect.x * size.width) / this.size.width,
+            y: (rect.y * size.height) / this.size.height,
+            width: (rect.width * size.width) / this.size.width,
+            height: (rect.height * size.height) / this.size.height
+          }
+        ])
+      )
+    const frames = scale(this.state.get().frames)
+    if (this.saved) {
+      this.saved = scale(this.saved)
+    }
     this.size = size
-    // Keep ratios while the application itself changes size.
-    this.publish()
+    this.state.set({ ...this.state.get(), frames })
   }
 
   arrange() {
-    this.columns = this.order.length < 2 ? 1 : this.size.width >= 1250 && this.order.length > 4 ? 3 : 2
-    this.widths = Array(this.columns).fill(1)
-    this.heights = Array(Math.max(1, Math.ceil(this.order.length / this.columns))).fill(1)
-    this.saved = null
-    this.publish(null)
-  }
-
-  private tracks(weights: number[], length: number) {
-    const gap = Math.min(8, length / Math.max(1, weights.length * 4))
-    const available = Math.max(0, length - gap * (weights.length - 1))
-    const sum = weights.reduce((a, b) => a + b, 0)
-    let offset = 0
-    return weights.map(weight => {
-      const track = { start: offset, length: (available * weight) / sum }
-      offset += track.length + gap
-      return track
-    })
-  }
-
-  private publish(focused = this.state.get().focused) {
-    const xs = this.tracks(this.widths, this.size.width)
-    const ys = this.tracks(this.heights, this.size.height)
-    const frames: Record<string, SessionWindowRect> = {}
+    const count = this.order.length
+    const columns = count < 2 ? 1 : this.size.width >= 1250 && count > 4 ? 3 : 2
+    const rows = Math.max(1, Math.ceil(count / columns))
+    const space = Math.min(gap, this.size.width / (columns * 4), this.size.height / (rows * 4))
+    const width = (this.size.width - space * (columns - 1)) / columns
+    const height = (this.size.height - space * (rows - 1)) / rows
+    const frames: Frames = {}
     this.order.forEach((id, index) => {
-      const col = index % this.columns
-      const row = Math.floor(index / this.columns)
-      const x = xs[col]!
-      const y = ys[row]!
-      // The last session fills unused cells in the last row.
-      const width = index === this.order.length - 1 ? this.size.width - x.start : x.length
-      frames[id] = { x: x.start, y: y.start, width, height: y.length }
+      const x = (index % columns) * (width + space)
+      frames[id] = {
+        x,
+        y: Math.floor(index / columns) * (height + space),
+        width: index === count - 1 ? this.size.width - x : width,
+        height
+      }
     })
-    this.state.set({ frames, focused })
+    this.saved = null
+    this.state.set({ frames, focused: null })
   }
 
   move(id: string, x: number, y: number) {
     const frames = this.state.get().frames
+    if (!frames[id]) {
+      return
+    }
     const target = this.order.find(
       key =>
         key !== id &&
@@ -90,71 +124,118 @@ export class SessionTileLayout {
     }
     const from = this.order.indexOf(id)
     const to = this.order.indexOf(target)
-    if (from < 0) {
-      return
-    }
-    ;[this.order[from], this.order[to]] = [target, id]
-    this.publish()
+    this.order[from] = target
+    this.order[to] = id
+    this.saved = null
+    this.state.set({ frames: { ...frames, [id]: frames[target]!, [target]: frames[id]! }, focused: null })
   }
 
   moveBy(id: string, dx: number, dy: number) {
-    const index = this.order.indexOf(id)
-    const target = this.order[index + (dy ? Math.sign(dy) * this.columns : Math.sign(dx))]
-    const frame = target && this.state.get().frames[target]
-    if (frame) {
-      this.move(id, frame.x + frame.width / 2, frame.y + frame.height / 2)
+    const frames = this.state.get().frames
+    const frame = frames[id]
+    if (!frame) {
+      return
+    }
+    const cx = frame.x + frame.width / 2
+    const cy = frame.y + frame.height / 2
+    const candidates = this.order
+      .filter(key => key !== id)
+      .map(key => {
+        const r = frames[key]!
+        return { r, x: r.x + r.width / 2 - cx, y: r.y + r.height / 2 - cy }
+      })
+      .filter(p => (dx ? p.x * dx > 0 : p.y * dy > 0))
+      .sort((a, b) => a.x * a.x + a.y * a.y - b.x * b.x - b.y * b.y)
+    const target = candidates[0]?.r
+    if (target) {
+      this.move(id, target.x + target.width / 2, target.y + target.height / 2)
     }
   }
 
   resize(id: string, edge: string, dx: number, dy: number) {
-    const index = this.order.indexOf(id)
-    if (index < 0) {
+    const frames = this.state.get().frames
+    const rect = frames[id]
+    if (!rect) {
       return
     }
-    const col = index % this.columns
-    const row = Math.floor(index / this.columns)
-    const change = (weights: number[], length: number, boundary: number, delta: number, min: number) => {
-      if (boundary < 0 || boundary >= weights.length - 1) {
-        return
+    const minWidth = Math.min(180, rect.width)
+    const minHeight = Math.min(120, rect.height)
+    const right = rect.x + rect.width
+    const bottom = rect.y + rect.height
+    const x = edge.includes('w') ? Math.max(0, Math.min(right - minWidth, rect.x + dx)) : rect.x
+    const y = edge.includes('n') ? Math.max(0, Math.min(bottom - minHeight, rect.y + dy)) : rect.y
+    const endX = edge.includes('e') ? Math.max(x + minWidth, Math.min(this.size.width, right + dx)) : right
+    const endY = edge.includes('s') ? Math.max(y + minHeight, Math.min(this.size.height, bottom + dy)) : bottom
+    const desired = { x, y, width: endX - x, height: endY - y }
+    const trial = (fraction: number): Frames | null => {
+      const candidate = {
+        x: rect.x + (desired.x - rect.x) * fraction,
+        y: rect.y + (desired.y - rect.y) * fraction,
+        width: rect.width + (desired.width - rect.width) * fraction,
+        height: rect.height + (desired.height - rect.height) * fraction
       }
-      const tracks = this.tracks(weights, length)
-      const a = tracks[boundary]!.length
-      const b = tracks[boundary + 1]!.length
-      const floor = Math.min(min, (a + b) / 3)
-      const next = Math.max(floor, Math.min(a + b - floor, a + delta))
-      const sum = weights[boundary]! + weights[boundary + 1]!
-      weights[boundary] = (sum * next) / (a + b)
-      weights[boundary + 1] = sum - weights[boundary]!
+      const next: Frames = { ...frames, [id]: candidate }
+      for (const [key, peer] of Object.entries(frames)) {
+        if (key === id || !intersects(candidate, peer)) {
+          continue
+        }
+        // Scaling the viewport can reduce gaps. Do not move untouched neighbours.
+        const wasOverlap = intersects(rect, peer)
+        const growsTowardPeer =
+          candidate.x < rect.x ||
+          candidate.y < rect.y ||
+          candidate.x + candidate.width > right ||
+          candidate.y + candidate.height > bottom
+        if (wasOverlap && !growsTowardPeer) {
+          continue
+        }
+        const adjusted = makeRoom(peer, candidate)
+        if (!adjusted) {
+          return null
+        }
+        next[key] = adjusted
+      }
+      return next
     }
-    if (edge.includes('w')) {
-      change(this.widths, this.size.width, col - 1, dx, 220)
-    }
-    if (edge.includes('e') && index !== this.order.length - 1) {
-      change(this.widths, this.size.width, col, dx, 220)
-    }
-    if (edge.includes('n')) {
-      change(this.heights, this.size.height, row - 1, dy, 140)
-    }
-    if (edge.includes('s')) {
-      change(this.heights, this.size.height, row, dy, 140)
+    let next = trial(1)
+    if (!next) {
+      let low = 0
+      let high = 1
+      next = frames
+      for (let i = 0; i < 24; i++) {
+        const mid = (low + high) / 2
+        const attempt = trial(mid)
+        if (attempt) {
+          low = mid
+          next = attempt
+        } else {
+          high = mid
+        }
+      }
     }
     this.saved = null
-    this.publish(null)
+    this.state.set({ frames: next, focused: null })
   }
 
   focus(id: string) {
     if (this.state.get().focused === id && this.saved) {
-      this.widths = this.saved.widths
-      this.heights = this.saved.heights
+      this.state.set({ frames: this.saved, focused: null })
       this.saved = null
-      this.publish(null)
       return
     }
-    this.saved ??= { widths: [...this.widths], heights: [...this.heights] }
-    const index = this.order.indexOf(id)
-    this.widths = this.widths.map((_, col) => (col === index % this.columns ? 2 : 1))
-    this.heights = this.heights.map((_, row) => (row === Math.floor(index / this.columns) ? 2 : 1))
-    this.publish(id)
+    const before = this.saved ?? this.state.get().frames
+    const rect = this.state.get().frames[id]
+    if (!rect) {
+      return
+    }
+    this.resize(
+      id,
+      rect.x > this.size.width / 2 ? 'w' : 'e',
+      rect.x > this.size.width / 2 ? -rect.width / 2 : rect.width / 2,
+      0
+    )
+    this.saved = before
+    this.state.set({ ...this.state.get(), focused: id })
   }
 }
 
