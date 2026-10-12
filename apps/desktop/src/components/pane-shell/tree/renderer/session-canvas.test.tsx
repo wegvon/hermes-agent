@@ -92,28 +92,42 @@ it('bounds windows on a smaller screen and assigns five usable initial frames', 
 it('drags and resizes a live window without replacing its chat or draft', () => {
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1500)
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(900)
-  const {container} = render(<LayoutTreeRoot />)
+  const { container } = render(<LayoutTreeRoot />)
   const frame = container.querySelector<HTMLElement>('[data-session-window="workspace"]')!
   const chat = frame.querySelector('textarea')!
-  fireEvent.change(chat, {target:{value:'unsent message'}})
-  const pointer = (target: HTMLElement, type: string, x:number, y:number) => {
+  fireEvent.change(chat, { target: { value: 'unsent message' } })
+  const pointer = (target: HTMLElement, type: string, x: number, y: number) => {
     target.setPointerCapture = () => undefined
-    const event = new MouseEvent(type, {bubbles:true, clientX:x, clientY:y, button:0})
-    Object.defineProperty(event, 'pointerId', {value:1})
-    act(()=>{target.dispatchEvent(event)})
+    const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 })
+    Object.defineProperty(event, 'pointerId', { value: 1 })
+    act(() => {
+      target.dispatchEvent(event)
+    })
   }
   const header = frame.querySelector('header')!
-  pointer(header,'pointerdown',100,100)
-  pointer(header,'pointermove',180,160)
-  pointer(header,'pointerup',180,160)
-  expect(Number.parseFloat(frame.style.left)).toBe(80)
-  expect(Number.parseFloat(frame.style.top)).toBe(60)
-  const width=Number.parseFloat(frame.style.width)
-  const grip=frame.querySelector<HTMLElement>('[data-session-resize="se"]')!
-  pointer(grip,'pointerdown',300,300)
-  pointer(grip,'pointermove',420,380)
-  pointer(grip,'pointerup',420,380)
-  expect(Number.parseFloat(frame.style.width)).toBe(width+120)
+  pointer(header, 'pointerdown', 100, 100)
+  pointer(header, 'pointermove', 700, 100)
+  pointer(header, 'pointerup', 700, 100)
+  expect(Number.parseFloat(frame.style.left)).toBeGreaterThan(400)
+  expect(Number.parseFloat(frame.style.top)).toBe(0)
+  const width = Number.parseFloat(frame.style.width)
+  const grip = frame.querySelector<HTMLElement>('[data-session-resize="se"]')!
+  pointer(grip, 'pointerdown', 300, 300)
+  pointer(grip, 'pointermove', 420, 380)
+  pointer(grip, 'pointerup', 420, 380)
+  expect(Number.parseFloat(frame.style.width)).toBeGreaterThan(width)
+  const frames = [...container.querySelectorAll<HTMLElement>('[data-session-window]')]
+  for (const a of frames)
+    for (const b of frames) {
+      if (a === b) continue
+      const rect = (el: HTMLElement) =>
+        [el.style.left, el.style.top, el.style.width, el.style.height].map(Number.parseFloat)
+      const [ax, ay, aw, ah] = rect(a),
+        [bx, by, bw, bh] = rect(b)
+      expect(
+        ax! + aw! <= bx! + 0.01 || bx! + bw! <= ax! + 0.01 || ay! + ah! <= by! + 0.01 || by! + bh! <= ay! + 0.01
+      ).toBe(true)
+    }
   expect(frame.querySelector('textarea')).toBe(chat)
   expect(chat.value).toBe('unsent message')
   expect(mounts.get('workspace')).toBe(1)

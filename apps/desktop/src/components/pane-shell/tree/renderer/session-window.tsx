@@ -19,9 +19,9 @@ import {
   $sessionCanvasArrange,
   arrangeSessionWindow,
   type CanvasSize,
-  fitSessionWindow,
   type SessionWindowRect
 } from './session-canvas-state'
+import { emptyTileSnapshot, sessionTileLayout, type SessionTileLayout } from './session-tile-layout'
 
 interface SessionWindowProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
   enabled: boolean
@@ -61,27 +61,35 @@ export function SessionWindow({
 
   const size = useRef<CanvasSize>({ width: 1000, height: 650 })
 
-  const [rect, setRect] = useState<SessionWindowRect>(() =>
-    arrangeSessionWindow(Math.max(0, index), count, size.current)
-  )
-
-  const [maximized, setMaximized] = useState(false)
+  const [layout, setLayout] = useState<SessionTileLayout | null>(null)
+  const snapshot = useStore(layout?.state ?? emptyTileSnapshot)
+  const rect = snapshot.frames[paneId] ?? arrangeSessionWindow(Math.max(0, index), count, size.current)
+  const maximized = snapshot.focused === paneId
   const arrange = useStore($sessionCanvasArrange)
-  const manual = useRef(false)
   const lastArrange = useRef(arrange)
   const parentRef = useRef<HTMLDivElement>(null)
 
+  useLayoutEffect(() => {
+    const parent = ref.current?.parentElement
+    if (!parent || !enabled) {
+      setLayout(null)
+      return
+    }
+    const shared = sessionTileLayout(parent)
+    shared.measure({ width: parent.clientWidth, height: parent.clientHeight })
+    shared.register(paneId, index)
+    setLayout(shared)
+    return () => shared.unregister(paneId)
+  }, [enabled, paneId])
+
   const measure = useCallback(() => {
     const parent = ref.current?.parentElement
-
-    if (!parent || !enabled) {return}
+    if (!parent || !enabled) {
+      return
+    }
     size.current = { width: parent.clientWidth, height: parent.clientHeight }
-
-    if (size.current.width <= 0 || size.current.height <= 0) {return}
-    setRect(old =>
-      manual.current ? fitSessionWindow(old, size.current) : arrangeSessionWindow(index, count, size.current)
-    )
-  }, [enabled, index, count])
+    layout?.measure(size.current)
+  }, [enabled, layout])
 
   useLayoutEffect(() => {
     parentRef.current = ref.current?.parentElement as HTMLDivElement | null
@@ -90,18 +98,20 @@ export function SessionWindow({
   useResizeObserver(measure, parentRef)
   useLayoutEffect(() => {
     if (lastArrange.current !== arrange) {
-      manual.current = false
       lastArrange.current = arrange
-      setMaximized(false)
-      measure()
+      layout?.arrange()
     }
-  }, [arrange, measure])
+  }, [arrange, layout])
 
   const down = (e: PointerEvent<HTMLElement>, edge: string) => {
-    if (e.button !== 0 || (e.target as HTMLElement).closest('button')) {return}
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button')) {
+      return
+    }
     onActivate()
 
-    if (maximized) {return}
+    if (maximized) {
+      return
+    }
     e.preventDefault()
     e.currentTarget.setPointerCapture(e.pointerId)
     gesture.current = { x: e.clientX, y: e.clientY, edge, rect }
@@ -110,40 +120,33 @@ export function SessionWindow({
   const move = (e: PointerEvent<HTMLElement>) => {
     const g = gesture.current
 
-    if (!g) {return}
+    if (!g) {
+      return
+    }
 
     const dx = e.clientX - g.x,
       dy = e.clientY - g.y
 
-    const next = { ...g.rect }
-
-    if (g.edge === 'move') {
-      next.x += dx
-      next.y += dy
-    } else {
-      if (g.edge.includes('e')) {next.width += dx}
-
-      if (g.edge.includes('s')) {next.height += dy}
-
-      if (g.edge.includes('w')) {
-        next.x += dx
-        next.width -= dx
-      }
-
-      if (g.edge.includes('n')) {
-        next.y += dy
-        next.height -= dy
-      }
+    if (g.edge !== 'move') {
+      layout?.resize(paneId, g.edge, dx, dy)
+      g.x = e.clientX
+      g.y = e.clientY
     }
-
-    manual.current = true
-    setRect(fitSessionWindow(next, size.current))
   }
 
   const up = (e: PointerEvent<HTMLElement>) => {
+    const g = gesture.current
+    if (g?.edge === 'move' && e.type !== 'pointercancel') {
+      const parent = ref.current?.parentElement?.getBoundingClientRect()
+      if (parent) {
+        layout?.move(paneId, e.clientX - parent.left, e.clientY - parent.top)
+      }
+    }
     gesture.current = null
 
-    if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {e.currentTarget.releasePointerCapture(e.pointerId)}
+    if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
   }
 
   const events = {
@@ -155,7 +158,7 @@ export function SessionWindow({
     }
   }
 
-  const frame = maximized ? { x: 0, y: 0, ...size.current } : rect
+  const frame = rect
 
   return (
     <div
@@ -189,7 +192,7 @@ export function SessionWindow({
           {...events}
           aria-label="Session penceresini taşı"
           className="flex h-10 shrink-0 cursor-grab items-center gap-2 border-b border-(--stroke-nous) px-3 select-none"
-          onDoubleClick={() => setMaximized(v => !v)}
+          onDoubleClick={() => layout?.focus(paneId)}
           onKeyDown={e => {
             const delta: Record<string, [number, number]> = {
               ArrowLeft: [-10, 0],
@@ -200,20 +203,15 @@ export function SessionWindow({
 
             const d = delta[e.key]
 
-            if (!d) {return}
+            if (!d) {
+              return
+            }
             e.preventDefault()
-            manual.current = true
-            setRect(old =>
-              fitSessionWindow(
-                {
-                  ...old,
-                  ...(e.shiftKey
-                    ? { width: old.width + d[0], height: old.height + d[1] }
-                    : { x: old.x + d[0], y: old.y + d[1] })
-                },
-                size.current
-              )
-            )
+            if (e.shiftKey) {
+              layout?.resize(paneId, 'se', d[0], d[1])
+            } else {
+              layout?.moveBy(paneId, d[0], d[1])
+            }
           }}
           onPointerDown={e => down(e, 'move')}
           style={{ touchAction: 'none' }}
@@ -222,7 +220,7 @@ export function SessionWindow({
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{title}</span>
           <Button
             aria-label={maximized ? 'Geri küçült' : 'Büyüt'}
-            onClick={() => setMaximized(v => !v)}
+            onClick={() => layout?.focus(paneId)}
             size="icon"
             variant="ghost"
           >

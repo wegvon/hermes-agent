@@ -6,7 +6,7 @@ Son doğrulanan durum: 12 Ekim 2026. Yeni işe başlarken dosyaları ve branch d
 ## 1. Projenin amacı
 
 Bir ekranda 4–5 **gerçek Hermes session'ını** aynı anda kullanmak.
-Her session bağımsız taşınabilir ve boyutlandırılabilir bir pencerede açılır.
+Her session, aynı canvas içindeki diğer session pencereleriyle alanı paylaşan bir pencerede açılır.
 Her pencere kendi geçmişini, taslağını, model seçimini ve mesaj gönderme alanını korur.
 
 Sadece tema, statik HTML, iframe içindeki sahte sohbet veya session değiştiren tek panel bu ihtiyacı karşılamaz.
@@ -60,9 +60,9 @@ Kanban gibi tam sayfa araçların mevcut davranışını koru.
 - Pencereler modu: Birden fazla session aynı çalışma alanında görünür.
 - Sidebar'dan session aç: Mevcut native session ek pencere olarak açılır.
 - + Yeni session: Yeni bir gerçek session penceresi açar.
-- Başlıktan sürükle, kenar ve köşelerden boyutlandır.
+- Başlığı başka pencerenin üzerine sürükleyip bırak: iki session yer değiştirir. Kenar/köşeleri çek: ortak satır/sütun sınırları değişir, pencereler çakışmaz.
 - Düzenle: Pencereleri çalışma alanına yeniden dizer.
-- Büyüt/geri al: Tek pencereyi geçici büyütür ve önceki boyutuna döndürür.
+- Büyüt/geri al: Session için daha fazla alan ayırır, diğerleri görünür kalır. Tekrar basınca önceki oranlara döner.
 - Sekmeler: Mevcut sekmeli görünüme döner.
 - Pencere başlığındaki klavye kontrolü: oklar taşır, Shift + oklar boyutlandırır.
 
@@ -175,3 +175,9 @@ Secret, API key, session geçmişi, kullanıcı veritabanı, log ve kişisel aya
 - Geri dönüş gerekirse önceki uygulama Çöp Sepeti'nden geri alınabilir. Kullanıcı verisini silme.
 
 Bu bölüm, yukarıdaki ilk prototip/kurulum durumunun güncel devamıdır.
+
+## 11. Çakışmasız session yerleşimi, 12 Ekim 2026
+
+`session-tile-layout.ts` canvas başına ortak yerleşim state sahibi oldu. Frame bileşenleri yalnız bu küçük store’u dinler. Başlık sürükleme bırakıldığında slot değiştirir. Resize komşu satır/sütunların payını değiştirir. Son satırdaki boş hücreler son session tarafından doldurulur. Büyütme diğer session’ları örtmez, alan oranlarını değiştirir. Pencere ekleme/çıkarma eşit dağılımı yeniden kurar. Geometri halen yeniden açılışta kalıcı değildir.
+
+Dört hedefli test dosyasında 16 test, renderer TypeScript kontrolü ve production build geçti. `session-tile-layout.test.ts` beş session için sınır, çakışmama, resize, yer değiştirme, büyüt/geri al ve küçük viewport davranışını kontrol eder. DOM testinde taşınan/boyutlanan chat bileşeni ve taslağı korunur. Başlıkta ok tuşları slot değiştirir, Shift+ok ortak alt/sağ sınırı ayarlar. Canvas dış kenarı büyütülemez. Yeni renderer mevcut özel runtime üzerine paketlenir, resmi updater engeli korunur.
