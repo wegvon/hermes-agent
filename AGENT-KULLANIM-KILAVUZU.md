@@ -159,3 +159,19 @@ Her anlamlı değişiklik sonunda bu kılavuzun durumunu güncelle.
 Commit, test sonucu, çalışan uygulama yolu ve kalan sınırlamaları kısa ve doğru yaz.
 Kaynak değişikliği, derlenmiş uygulama ve ekrandaki çalışan sürümün aynı şey olduğunu varsayma.
 Secret, API key, session geçmişi, kullanıcı veritabanı, log ve kişisel ayarları public repo'ya ekleme.
+
+## 10. Günlük kullanım kurulumu, 12 Ekim 2026
+
+- Aktif kurulum: `/Applications/Hermes Workspace.app`.
+- Uygulama kimliği: `com.wegvon.hermes.workspace`. Menü/Dock adı: Hermes Workspace.
+- Eski `/Applications/Hermes.app` Finder ile Çöp Sepeti'ne taşındı. Çöp Sepeti boşaltılmadı.
+- Önceki çalışma klasörü uygulaması kapatıldı. Yeni kurulum açıldı, backend ready ve mevcut session/model/tema durumu görüldü.
+- Mevcut Hermes veri ve backend kurulumu korundu. Bu uygulama bağımsız yeni bir backend kurulumu değildir.
+- Paketleme tarifi: `scripts/fork/package-workspace.py`. Girdi, özel renderer'ı zaten içeren doğrulanmış macOS app bundle'ıdır. Script kaynak derlemesi yapmaz.
+- Paketleme script'i bundle adını/kimliğini/ikonunu ayarlar, paketlenmiş main dosyasındaki uygulama güncelleme kontrolünü desteklenmiyor olarak döndürür ve uygulama güncelleme uygulama girişini hata ile durdurur. Sonra JS syntax ve ad-hoc imzayı doğrular.
+- Bu engel Desktop'ın yerel uygulama güncelleme girişleri içindir. Terminalden backend güncellemesi veya başka kurulum araçları için genel bir engel değildir.
+- Paketleme uyarlaması Electron main kaynak dosyasına henüz taşınmadı. Sonraki build'de bu script uygulanmadan aynı korumanın var olduğunu varsayma. Upstream runtime değişirse script'in eşleşme kontrolü başarısız olur ve inceleme gerekir.
+- Yerel imza kontrolü geçti. Apple noter onaylı dağıtım veya otomatik fork güncelleyicisi kurulmuş değildir.
+- Geri dönüş gerekirse önceki uygulama Çöp Sepeti'nden geri alınabilir. Kullanıcı verisini silme.
+
+Bu bölüm, yukarıdaki ilk prototip/kurulum durumunun güncel devamıdır.
