@@ -24,6 +24,7 @@ import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overla
 import { NotificationStack } from '@/components/notifications'
 import { DesktopOnboardingOverlay } from '@/components/onboarding'
 import { OnboardingChatGate } from '@/components/onboarding-chat/gate'
+import { $sessionCanvas } from '@/components/pane-shell/tree/renderer/session-canvas-state'
 import { $newSessionTabAction, registerPaneCloser } from '@/components/pane-shell/tree/store'
 import {
   $workspaceMode,
@@ -1032,7 +1033,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     archiveSelectedSession,
     openNewSessionTab,
     requestGateway,
-    startFreshSession: startFreshSessionDraft,
+    startFreshSession: () => $sessionCanvas.get() ? openNewSessionTab() : startFreshSessionDraft(),
     toggleCommandCenter,
     toggleSelectedPin
   })
@@ -1079,7 +1080,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
       requestSessionResume(sessionId)
     }
 
-    openSession(sessionId, navigate)
+    openSession(sessionId, navigate, $sessionCanvas.get() ? 'tab' : 'in-place')
   }
 
   // The controller's entire callback surface, gathered into the stable
@@ -1124,7 +1125,14 @@ export function ContribWiring({ children }: { children: ReactNode }) {
       setCronFocusJobId(jobId)
       navigate(CRON_ROUTE)
     },
-    onNavigate: selectSidebarItem,
+    onNavigate: item => {
+      if ($sessionCanvas.get() && item.action === 'new-session') {
+        setWorkspaceScope('sessions')
+        void openNewSessionTile('center', { listed: false })
+      } else {
+        selectSidebarItem(item)
+      }
+    },
     onNewSessionInWorkspace: path => startSessionInWorkspace(path, { openTab: true }),
     onNewSessionSplit: (dir, opts) =>
       void openNewSessionTile(dir, {

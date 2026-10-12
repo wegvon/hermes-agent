@@ -12,6 +12,7 @@
 import { useStore } from '@nanostores/react'
 import { type CSSProperties, Fragment, type ReactNode, type RefObject, useEffect, useRef, useState } from 'react'
 
+import { $workspaceIsPage } from '@/app/routes'
 import { ShellMenuItems } from '@/app/context-menu/shell-menu-items'
 import { TITLEBAR_DRAG_HANDLE_WIDTH, TITLEBAR_HEIGHT } from '@/app/shell/titlebar'
 import { ActionsContextMenu, type MenuKit, renderActionItem } from '@/components/ui/actions-menu'
@@ -91,6 +92,8 @@ import { usePanelTitlebar } from './panel-titlebar'
 import { tabStripVisibleForZone } from './strip-visibility'
 import { useActiveTabVisible } from './tab-strip-scroll'
 import { paneChrome } from './track-model'
+import { $sessionCanvas, isCanvasSession } from './session-canvas-state'
+import { SessionWindow, SessionCanvasControls } from './session-window'
 
 /** Right-click zone menu: the tab verbs (close this / others / to the right /
  *  all) plus the strip's own chrome toggles. Same items and icons as a session
@@ -268,6 +271,8 @@ export function TreeGroup({
   const [menuPane, setMenuPane] = useState<string | undefined>(undefined)
   const panes = useContributions('panes')
   const stableHosts = useStablePaneHosts()
+  const canvasEnabled = useStore($sessionCanvas)
+  const workspaceIsPage = useStore($workspaceIsPage)
   // Coarse drag flag only (set once at drag start/end). The per-frame drop
   // HINT lives in ZoneDropOverlay so a moving pointer re-renders the tiny
   // overlay, not every zone's header/body (and not the menuDirections walk).
@@ -306,6 +311,8 @@ export function TreeGroup({
     ? node.active
     : (resolveRememberedActivePane(memoryKey, shown) ?? shown[0] ?? '')
 
+  const canvas = canvasEnabled && isCanvasSession(activeId) && !(workspaceIsPage && activeId === 'workspace') && !editMode
+  const canvasIds = canvas ? shown.filter(id => isCanvasSession(id) && !(workspaceIsPage && id === 'workspace')) : []
   const active = paneFor(activeId)
   const isEmpty = shown.length === 0
   const sidebarGroup = !node.panes.some(id => id === 'workspace' || paneChrome(paneFor(id)).placement === 'main')
@@ -352,6 +359,11 @@ export function TreeGroup({
       keepAlive: id => Boolean(paneChrome(paneFor(id)).lifecycleKeepAlive),
       paneIds: shown
     })
+  }
+
+  // Every exposed window is visible, so none may be parked by the tab LRU.
+  for (const id of canvasIds) {
+    lifecycleRef.current.entries[id] = { lifecycle: 'visible', lastVisible: lifecycleRef.current.clock }
   }
 
   const paneLifecycle = lifecycleRef.current.entries
@@ -620,7 +632,8 @@ export function TreeGroup({
                 }
               >
                 {shown.map((paneId, index) => {
-                  const isActive = paneId === activeId && !node.minimized
+                  const floating = canvasIds.includes(paneId)
+              const isActive = (floating || paneId === activeId) && !node.minimized
                   const chrome = paneChrome(paneFor(paneId))
                   const closeable = closeableTab(paneId)
                   const title = tabText(paneId)
@@ -784,6 +797,10 @@ export function TreeGroup({
         </div>
       )}
 
+      {shown.some(isCanvasSession) && !(workspaceIsPage && activeId === 'workspace') && (
+        <SessionCanvasControls enabled={canvasEnabled} onNew={newSessionTabAction ?? undefined} />
+      )}
+
       {/* Body: the zone's pane content — the active pane and bounded hot-hidden
           cache stay mounted in absolute layers; parked panes are unmounted.
           `visibility` (not display) keeps the hidden pane's layout box, so
@@ -829,10 +846,19 @@ export function TreeGroup({
           ) : (
             inlinePanes.map(paneId => {
               const pane = paneFor(paneId)
-              const isActive = paneId === activeId && !node.minimized
+              const floating = canvasIds.includes(paneId)
+              const isActive = (floating || paneId === activeId) && !node.minimized
 
               return (
-                <div
+                <SessionWindow
+                  enabled={floating}
+                  paneId={paneId}
+                  index={canvasIds.indexOf(paneId)}
+                  count={canvasIds.length}
+                  title={tabLabel(paneId)}
+                  active={paneId === activeId}
+                  onActivate={() => activateTreePane(node.id, paneId)}
+                  onClose={closeableTab(paneId) ? () => closeTab(paneId) : undefined}
                   aria-hidden={!isActive || undefined}
                   className={cn(
                     'absolute inset-0 overflow-auto',
@@ -868,7 +894,7 @@ export function TreeGroup({
                       </div>
                     )
                   )}
-                </div>
+                </SessionWindow>
               )
             })
           )}
